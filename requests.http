@@ -1,0 +1,238 @@
+### Potato Service API - HTTP Requests
+### Make sure the service is running on http://localhost:8081
+
+@baseUrl = http://localhost:8081/api/v1
+
+###############################################################################
+# Health Check
+###############################################################################
+
+### Health Check
+GET {{baseUrl}}/health
+
+###############################################################################
+# Potatoes
+###############################################################################
+
+### Get All Potatoes
+GET {{baseUrl}}/potatoes
+
+### Get Potatoes by Variety
+GET {{baseUrl}}/potatoes?variety=Russet
+
+### Get Specific Potato
+GET {{baseUrl}}/potatoes/p001
+
+### Create New Potato
+POST {{baseUrl}}/potatoes
+Content-Type: application/json
+
+{
+  "id": "p999",
+  "variety": "Russet",
+  "origin": "Idaho",
+  "weight": 0.45,
+  "quality": "Premium",
+  "harvest_date": "2024-11-15T10:00:00Z",
+  "price": 2.99
+}
+
+### Create Yukon Gold Potato
+POST {{baseUrl}}/potatoes
+Content-Type: application/json
+
+{
+  "id": "p998",
+  "variety": "Yukon Gold",
+  "origin": "Canada",
+  "weight": 0.38,
+  "quality": "Premium",
+  "harvest_date": "2024-11-16T10:00:00Z",
+  "price": 3.49
+}
+
+### Update Potato
+PUT {{baseUrl}}/potatoes/p999
+Content-Type: application/json
+
+{
+  "variety": "Russet",
+  "origin": "Washington",
+  "weight": 0.50,
+  "quality": "Premium",
+  "harvest_date": "2024-11-15T10:00:00Z",
+  "price": 3.49
+}
+
+### Delete Potato
+DELETE {{baseUrl}}/potatoes/p999
+
+### Check Potato Freshness
+GET {{baseUrl}}/potatoes/p001/freshness
+
+###############################################################################
+# Inventory & Analytics
+###############################################################################
+
+### Get Inventory Summary
+GET {{baseUrl}}/inventory
+
+### Get Analytics
+GET {{baseUrl}}/analytics
+
+###############################################################################
+# Recipes
+###############################################################################
+
+### Get All Recipes
+GET {{baseUrl}}/recipes
+
+### Get Recipes by Variety
+GET {{baseUrl}}/recipes?variety=Russet
+
+### Get Specific Recipe
+GET {{baseUrl}}/recipes/r001
+
+### Create New Recipe
+POST {{baseUrl}}/recipes
+Content-Type: application/json
+
+{
+  "id": "r999",
+  "name": "Perfect Hash Browns",
+  "variety": "Russet",
+  "cooking_time": 20,
+  "difficulty": "Medium",
+  "ingredients": [
+    "2 large Russet potatoes",
+    "2 tbsp butter",
+    "1 onion diced",
+    "Salt and pepper",
+    "Paprika"
+  ],
+  "instructions": [
+    "Grate potatoes and squeeze out excess moisture",
+    "Heat butter in large skillet",
+    "Add potatoes and onion, press flat",
+    "Cook 8-10 minutes until golden",
+    "Flip and cook other side",
+    "Season with salt, pepper, and paprika"
+  ],
+  "servings": 2
+}
+
+### Create Sweet Potato Recipe
+POST {{baseUrl}}/recipes
+Content-Type: application/json
+
+{
+  "id": "r998",
+  "name": "Sweet Potato Curry",
+  "variety": "Sweet Potato",
+  "cooking_time": 40,
+  "difficulty": "Medium",
+  "ingredients": [
+    "3 Sweet potatoes cubed",
+    "1 can coconut milk",
+    "2 tbsp curry paste",
+    "1 onion",
+    "Garlic and ginger",
+    "Spinach"
+  ],
+  "instructions": [
+    "Sauté onion, garlic, and ginger",
+    "Add curry paste and cook 1 minute",
+    "Add sweet potatoes and coconut milk",
+    "Simmer 25-30 minutes until tender",
+    "Add spinach and cook until wilted",
+    "Serve with rice"
+  ],
+  "servings": 4
+}
+
+### Get Recipe Recommendation (Russet, Easy)
+GET {{baseUrl}}/recipes/recommend?variety=Russet&difficulty=Easy
+
+### Get Recipe Recommendation (Any Difficulty)
+GET {{baseUrl}}/recipes/recommend?variety=Yukon Gold
+
+### Get Recipe Recommendation (Sweet Potato, Medium)
+GET {{baseUrl}}/recipes/recommend?variety=Sweet Potato&difficulty=Medium
+
+###############################################################################
+# Test Scenarios
+###############################################################################
+
+### Scenario: Full Potato Lifecycle
+# 1. Create a new potato
+POST {{baseUrl}}/potatoes
+Content-Type: application/json
+
+{
+  "id": "test-potato-1",
+  "variety": "Purple Potato",
+  "origin": "Peru",
+  "weight": 0.35,
+  "quality": "Premium",
+  "harvest_date": "2024-11-17T10:00:00Z",
+  "price": 5.49
+}
+
+###
+# 2. Check its freshness
+GET {{baseUrl}}/potatoes/test-potato-1/freshness
+
+###
+# 3. Update it
+PUT {{baseUrl}}/potatoes/test-potato-1
+Content-Type: application/json
+
+{
+  "variety": "Purple Potato",
+  "origin": "Peru",
+  "weight": 0.35,
+  "quality": "Standard",
+  "harvest_date": "2024-11-17T10:00:00Z",
+  "price": 4.49
+}
+
+###
+# 4. View updated potato
+GET {{baseUrl}}/potatoes/test-potato-1
+
+###
+# 5. Check inventory to see it included
+GET {{baseUrl}}/inventory
+
+###
+# 6. Delete it
+DELETE {{baseUrl}}/potatoes/test-potato-1
+
+###
+# 7. Verify it's gone (should return 404)
+GET {{baseUrl}}/potatoes/test-potato-1
+
+###############################################################################
+# Error Cases
+###############################################################################
+
+### Get Non-existent Potato (404)
+GET {{baseUrl}}/potatoes/does-not-exist
+
+### Create Potato with Invalid Data (400)
+POST {{baseUrl}}/potatoes
+Content-Type: application/json
+
+{
+  "id": "",
+  "variety": "Russet",
+  "weight": -1.0,
+  "price": -5.0
+}
+
+### Recommend Recipe without Variety (400)
+GET {{baseUrl}}/recipes/recommend
+
+### Get Non-existent Recipe (404)
+GET {{baseUrl}}/recipes/does-not-exist
+
