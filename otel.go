@@ -55,6 +55,11 @@ type Observability struct {
 	requestDuration metric.Float64Histogram
 	errorCounter    metric.Int64Counter
 
+	// Business metrics
+	inventoryLevel  metric.Int64Gauge
+	potatoFreshness metric.Float64Histogram
+	recipeViews     metric.Int64Counter
+
 	logger      logapi.Logger
 	serviceName string
 }
@@ -94,9 +99,22 @@ func initOpenTelemetry(ctx context.Context) (*Observability, error) {
 	otel.SetTracerProvider(tracerProvider)
 
 	reader := sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(defaultMetricExportFreq))
+	requestDurationView := sdkmetric.NewView(
+		sdkmetric.Instrument{
+			Name: "http.server.request_duration_ms",
+			Kind: sdkmetric.InstrumentKindHistogram,
+		},
+		sdkmetric.Stream{
+			Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
+				Boundaries: []float64{5, 10, 25, 50, 100, 250, 500, 1000, 2000, 5000},
+				NoMinMax:   false,
+			},
+		},
+	)
 	meterProvider := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(reader),
+		sdkmetric.WithView(requestDurationView),
 	)
 	otel.SetMeterProvider(meterProvider)
 
@@ -133,6 +151,31 @@ func initOpenTelemetry(ctx context.Context) (*Observability, error) {
 		return nil, fmt.Errorf("create error counter: %w", err)
 	}
 
+	inventoryLevel, err := meter.Int64Gauge(
+		"potato.inventory.level",
+		metric.WithDescription("Current number of potatoes in inventory by variety"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create inventory gauge: %w", err)
+	}
+
+	potatoFreshness, err := meter.Float64Histogram(
+		"potato.freshness.score",
+		metric.WithDescription("Freshness score of potatoes (0.0-1.0)"),
+		metric.WithUnit("1"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create freshness histogram: %w", err)
+	}
+
+	recipeViews, err := meter.Int64Counter(
+		"recipe.views",
+		metric.WithDescription("Number of times recipes are viewed or recommended"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create recipe views counter: %w", err)
+	}
+
 	telemetry := &Observability{
 		tracerProvider:  tracerProvider,
 		meterProvider:   meterProvider,
@@ -140,6 +183,9 @@ func initOpenTelemetry(ctx context.Context) (*Observability, error) {
 		requestCounter:  requestCounter,
 		requestDuration: requestDuration,
 		errorCounter:    errorCounter,
+		inventoryLevel:  inventoryLevel,
+		potatoFreshness: potatoFreshness,
+		recipeViews:     recipeViews,
 		logger:          loggerProvider.Logger(instrumentationName),
 		serviceName:     cfg.ServiceName,
 	}
@@ -235,7 +281,7 @@ func (o *Observability) logRequest(ctx context.Context, route, method string, st
 
 	record := logapi.Record{}
 	record.SetTimestamp(time.Now())
-	record.SetBody(logapi.StringValue(fmt.Sprintf("%s %s", method, route)))
+	record.SetBody(logapi.StringValue(fmt.Sprintf("%s %s - %d - %.2fms", method, route, status, float64(duration.Microseconds())/1000)))
 
 	switch {
 	case status >= 500:
@@ -267,6 +313,33 @@ func (o *Observability) logRequest(ctx context.Context, route, method string, st
 	}
 
 	o.logger.Emit(ctx, record)
+}
+
+func (o *Observability) RecordInventory(ctx context.Context, variety string, count int) {
+	if o == nil || o.inventoryLevel == nil {
+		return
+	}
+	o.inventoryLevel.Record(ctx, int64(count),
+		metric.WithAttributes(attribute.String("potato.variety", variety)))
+}
+
+func (o *Observability) RecordFreshness(ctx context.Context, variety string, freshness float64) {
+	if o == nil || o.potatoFreshness == nil {
+		return
+	}
+	o.potatoFreshness.Record(ctx, freshness,
+		metric.WithAttributes(attribute.String("potato.variety", variety)))
+}
+
+func (o *Observability) RecordRecipeView(ctx context.Context, recipeID, recipeName string) {
+	if o == nil || o.recipeViews == nil {
+		return
+	}
+	o.recipeViews.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("recipe.id", recipeID),
+			attribute.String("recipe.name", recipeName),
+		))
 }
 
 func loadTelemetryConfig() telemetryConfig {
