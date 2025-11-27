@@ -47,8 +47,8 @@ func main() {
 	potatoService := service.NewPotatoService(store)
 	recipeService := service.NewRecipeService(store)
 
-	potatoHandler := handlers.NewPotatoHandler(potatoService)
-	recipeHandler := handlers.NewRecipeHandler(recipeService)
+	potatoHandler := handlers.NewPotatoHandler(potatoService, telemetry)
+	recipeHandler := handlers.NewRecipeHandler(recipeService, telemetry)
 
 	r := mux.NewRouter()
 	api := r.PathPrefix("/api/v1").Subrouter()

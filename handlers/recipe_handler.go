@@ -16,12 +16,14 @@ import (
 var recipeTracer = otel.Tracer("github.com/williamdumont/potato-demo/handlers/recipe")
 
 type RecipeHandler struct {
-	service *service.RecipeService
+	service   *service.RecipeService
+	telemetry TelemetryRecorder
 }
 
-func NewRecipeHandler(service *service.RecipeService) *RecipeHandler {
+func NewRecipeHandler(service *service.RecipeService, telemetry TelemetryRecorder) *RecipeHandler {
 	return &RecipeHandler{
-		service: service,
+		service:   service,
+		telemetry: telemetry,
 	}
 }
 
@@ -31,8 +33,7 @@ func (h *RecipeHandler) CreateRecipe(w http.ResponseWriter, r *http.Request) {
 
 	var recipe models.Recipe
 	if err := json.NewDecoder(r.Body).Decode(&recipe); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "invalid request payload")
+		recordSpanError(span, err, "validation_error", "client_error", "invalid request payload")
 		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
@@ -41,8 +42,7 @@ func (h *RecipeHandler) CreateRecipe(w http.ResponseWriter, r *http.Request) {
 
 	createdRecipe, err := h.service.CreateRecipe(recipe)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+		recordSpanError(span, err, "validation_error", "client_error", err.Error())
 		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -62,18 +62,24 @@ func (h *RecipeHandler) GetRecipe(w http.ResponseWriter, r *http.Request) {
 
 	recipe, err := h.service.GetRecipe(id)
 	if err != nil {
-		span.RecordError(err)
 		status := http.StatusInternalServerError
 		msg := err.Error()
+		errType := "storage_error"
+		errCategory := "server_error"
 		if err == storage.ErrRecipeNotFound {
 			status = http.StatusNotFound
 			msg = "Recipe not found"
+			errType = "not_found"
+			errCategory = "client_error"
 		}
-		span.SetStatus(codes.Error, msg)
+		recordSpanError(span, err, errType, errCategory, msg)
 		respondWithError(w, status, msg)
 		return
 	}
 
+	if h.telemetry != nil {
+		h.telemetry.RecordRecipeView(r.Context(), recipe.ID, recipe.Name)
+	}
 	span.SetStatus(codes.Ok, "recipe retrieved")
 	respondWithJSON(w, http.StatusOK, recipe)
 }
@@ -111,20 +117,28 @@ func (h *RecipeHandler) RecommendRecipe(w http.ResponseWriter, r *http.Request) 
 	)
 
 	if variety == "" {
-		span.SetStatus(codes.Error, "missing variety parameter")
+		recordSpanError(span, nil, "validation_error", "client_error", "missing variety parameter")
 		respondWithError(w, http.StatusBadRequest, "variety parameter is required")
 		return
 	}
 
 	recipe, err := h.service.RecommendRecipe(variety, difficulty)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+		errType := "not_found"
+		errCategory := "client_error"
+		if err != storage.ErrRecipeNotFound {
+			errType = "storage_error"
+			errCategory = "server_error"
+		}
+		recordSpanError(span, err, errType, errCategory, err.Error())
 		respondWithError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
 	span.SetAttributes(attribute.String("recipe.id", recipe.ID))
+	if h.telemetry != nil {
+		h.telemetry.RecordRecipeView(r.Context(), recipe.ID, recipe.Name)
+	}
 	span.SetStatus(codes.Ok, "recipe recommendation ready")
 	respondWithJSON(w, http.StatusOK, recipe)
 }

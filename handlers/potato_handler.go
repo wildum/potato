@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/williamdumont/potato-demo/models"
@@ -16,12 +17,14 @@ import (
 var potatoTracer = otel.Tracer("github.com/williamdumont/potato-demo/handlers/potato")
 
 type PotatoHandler struct {
-	service *service.PotatoService
+	service   *service.PotatoService
+	telemetry TelemetryRecorder
 }
 
-func NewPotatoHandler(service *service.PotatoService) *PotatoHandler {
+func NewPotatoHandler(service *service.PotatoService, telemetry TelemetryRecorder) *PotatoHandler {
 	return &PotatoHandler{
-		service: service,
+		service:   service,
+		telemetry: telemetry,
 	}
 }
 
@@ -31,8 +34,7 @@ func (h *PotatoHandler) CreatePotato(w http.ResponseWriter, r *http.Request) {
 
 	var potato models.Potato
 	if err := json.NewDecoder(r.Body).Decode(&potato); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "invalid request payload")
+		recordSpanError(span, err, "validation_error", "client_error", "invalid request payload")
 		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
@@ -41,8 +43,7 @@ func (h *PotatoHandler) CreatePotato(w http.ResponseWriter, r *http.Request) {
 
 	createdPotato, err := h.service.CreatePotato(potato)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
+		recordSpanError(span, err, "validation_error", "client_error", err.Error())
 		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -62,14 +63,17 @@ func (h *PotatoHandler) GetPotato(w http.ResponseWriter, r *http.Request) {
 
 	potato, err := h.service.GetPotato(id)
 	if err != nil {
-		span.RecordError(err)
 		status := http.StatusInternalServerError
 		msg := err.Error()
+		errType := "storage_error"
+		errCategory := "server_error"
 		if err == storage.ErrNotFound {
 			status = http.StatusNotFound
 			msg = "Potato not found"
+			errType = "not_found"
+			errCategory = "client_error"
 		}
-		span.SetStatus(codes.Error, msg)
+		recordSpanError(span, err, errType, errCategory, msg)
 		respondWithError(w, status, msg)
 		return
 	}
@@ -109,8 +113,7 @@ func (h *PotatoHandler) UpdatePotato(w http.ResponseWriter, r *http.Request) {
 
 	var potato models.Potato
 	if err := json.NewDecoder(r.Body).Decode(&potato); err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "invalid request payload")
+		recordSpanError(span, err, "validation_error", "client_error", "invalid request payload")
 		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
@@ -119,14 +122,16 @@ func (h *PotatoHandler) UpdatePotato(w http.ResponseWriter, r *http.Request) {
 	potato.ID = id
 	updatedPotato, err := h.service.UpdatePotato(id, potato)
 	if err != nil {
-		span.RecordError(err)
 		status := http.StatusBadRequest
 		msg := err.Error()
+		errType := "validation_error"
+		errCategory := "client_error"
 		if err == storage.ErrNotFound {
 			status = http.StatusNotFound
 			msg = "Potato not found"
+			errType = "not_found"
 		}
-		span.SetStatus(codes.Error, msg)
+		recordSpanError(span, err, errType, errCategory, msg)
 		respondWithError(w, status, msg)
 		return
 	}
@@ -144,14 +149,17 @@ func (h *PotatoHandler) DeletePotato(w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(attribute.String("potato.id", id))
 
 	if err := h.service.DeletePotato(id); err != nil {
-		span.RecordError(err)
 		status := http.StatusInternalServerError
 		msg := err.Error()
+		errType := "storage_error"
+		errCategory := "server_error"
 		if err == storage.ErrNotFound {
 			status = http.StatusNotFound
 			msg = "Potato not found"
+			errType = "not_found"
+			errCategory = "client_error"
 		}
-		span.SetStatus(codes.Error, msg)
+		recordSpanError(span, err, errType, errCategory, msg)
 		respondWithError(w, status, msg)
 		return
 	}
@@ -169,6 +177,11 @@ func (h *PotatoHandler) GetInventory(w http.ResponseWriter, r *http.Request) {
 		attribute.Int("inventory.total_potatoes", summary.TotalPotatoes),
 		attribute.Int("inventory.variety_count", len(summary.ByVariety)),
 	)
+	if h.telemetry != nil {
+		for _, item := range summary.ByVariety {
+			h.telemetry.RecordInventory(r.Context(), item.Variety, item.TotalQuantity)
+		}
+	}
 	span.SetStatus(codes.Ok, "inventory summary retrieved")
 	respondWithJSON(w, http.StatusOK, summary)
 }
@@ -195,24 +208,45 @@ func (h *PotatoHandler) CheckFreshness(w http.ResponseWriter, r *http.Request) {
 
 	potato, err := h.service.GetPotato(id)
 	if err != nil {
-		span.RecordError(err)
 		status := http.StatusInternalServerError
 		msg := err.Error()
+		errType := "storage_error"
+		errCategory := "server_error"
 		if err == storage.ErrNotFound {
 			status = http.StatusNotFound
 			msg = "Potato not found"
+			errType = "not_found"
+			errCategory = "client_error"
 		}
-		span.SetStatus(codes.Error, msg)
+		recordSpanError(span, err, errType, errCategory, msg)
 		respondWithError(w, status, msg)
 		return
 	}
 
 	freshness := h.service.CalculateFreshness(potato)
 	span.SetAttributes(attribute.String("potato.freshness", freshness))
+	if h.telemetry != nil {
+		h.telemetry.RecordFreshness(r.Context(), potato.Variety, freshnessScoreForStatus(freshness))
+	}
 	span.SetStatus(codes.Ok, "freshness calculated")
 	respondWithJSON(w, http.StatusOK, map[string]string{
 		"id":        potato.ID,
 		"variety":   potato.Variety,
 		"freshness": freshness,
 	})
+}
+
+func freshnessScoreForStatus(status string) float64 {
+	switch strings.ToLower(status) {
+	case "fresh":
+		return 1.0
+	case "good":
+		return 0.75
+	case "fair":
+		return 0.5
+	case "old":
+		return 0.25
+	default:
+		return 0.0
+	}
 }
