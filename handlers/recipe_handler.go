@@ -8,7 +8,12 @@ import (
 	"github.com/williamdumont/potato-demo/models"
 	"github.com/williamdumont/potato-demo/service"
 	"github.com/williamdumont/potato-demo/storage"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
+
+var recipeTracer = otel.Tracer("github.com/williamdumont/potato-demo/handlers/recipe")
 
 type RecipeHandler struct {
 	service *service.RecipeService
@@ -21,19 +26,29 @@ func NewRecipeHandler(service *service.RecipeService) *RecipeHandler {
 }
 
 func (h *RecipeHandler) CreateRecipe(w http.ResponseWriter, r *http.Request) {
+	_, span := recipeTracer.Start(r.Context(), "RecipeHandler.CreateRecipe")
+	defer span.End()
+
 	var recipe models.Recipe
 	if err := json.NewDecoder(r.Body).Decode(&recipe); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "invalid request payload")
 		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
+	span.SetAttributes(attribute.String("recipe.name", recipe.Name))
 	defer r.Body.Close()
 
 	createdRecipe, err := h.service.CreateRecipe(recipe)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
+	span.SetAttributes(attribute.String("recipe.id", createdRecipe.ID))
+	span.SetStatus(codes.Ok, "recipe created")
 	respondWithJSON(w, http.StatusCreated, createdRecipe)
 }
 
@@ -41,21 +56,36 @@ func (h *RecipeHandler) GetRecipe(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	_, span := recipeTracer.Start(r.Context(), "RecipeHandler.GetRecipe")
+	defer span.End()
+	span.SetAttributes(attribute.String("recipe.id", id))
+
 	recipe, err := h.service.GetRecipe(id)
 	if err != nil {
+		span.RecordError(err)
+		status := http.StatusInternalServerError
+		msg := err.Error()
 		if err == storage.ErrRecipeNotFound {
-			respondWithError(w, http.StatusNotFound, "Recipe not found")
-			return
+			status = http.StatusNotFound
+			msg = "Recipe not found"
 		}
-		respondWithError(w, http.StatusInternalServerError, err.Error())
+		span.SetStatus(codes.Error, msg)
+		respondWithError(w, status, msg)
 		return
 	}
 
+	span.SetStatus(codes.Ok, "recipe retrieved")
 	respondWithJSON(w, http.StatusOK, recipe)
 }
 
 func (h *RecipeHandler) GetAllRecipes(w http.ResponseWriter, r *http.Request) {
 	variety := r.URL.Query().Get("variety")
+
+	_, span := recipeTracer.Start(r.Context(), "RecipeHandler.GetAllRecipes")
+	defer span.End()
+	if variety != "" {
+		span.SetAttributes(attribute.String("recipe.variety", variety))
+	}
 
 	var recipes []models.Recipe
 	if variety != "" {
@@ -64,6 +94,8 @@ func (h *RecipeHandler) GetAllRecipes(w http.ResponseWriter, r *http.Request) {
 		recipes = h.service.GetAllRecipes()
 	}
 
+	span.SetAttributes(attribute.Int("recipe.count", len(recipes)))
+	span.SetStatus(codes.Ok, "recipe list retrieved")
 	respondWithJSON(w, http.StatusOK, recipes)
 }
 
@@ -71,17 +103,28 @@ func (h *RecipeHandler) RecommendRecipe(w http.ResponseWriter, r *http.Request) 
 	variety := r.URL.Query().Get("variety")
 	difficulty := r.URL.Query().Get("difficulty")
 
+	_, span := recipeTracer.Start(r.Context(), "RecipeHandler.RecommendRecipe")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("recipe.variety", variety),
+		attribute.String("recipe.difficulty", difficulty),
+	)
+
 	if variety == "" {
+		span.SetStatus(codes.Error, "missing variety parameter")
 		respondWithError(w, http.StatusBadRequest, "variety parameter is required")
 		return
 	}
 
 	recipe, err := h.service.RecommendRecipe(variety, difficulty)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		respondWithError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
+	span.SetAttributes(attribute.String("recipe.id", recipe.ID))
+	span.SetStatus(codes.Ok, "recipe recommendation ready")
 	respondWithJSON(w, http.StatusOK, recipe)
 }
-
