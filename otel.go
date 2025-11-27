@@ -385,7 +385,12 @@ func newMetricExporter(ctx context.Context, endpoint string) (*otlpmetrichttp.Ex
 func newLogExporter(ctx context.Context, endpoint string) (*otlploghttp.Exporter, error) {
 	expCtx, cancel := context.WithTimeout(ctx, exporterInitTimeout)
 	defer cancel()
-	return otlploghttp.New(expCtx, otlploghttp.WithEndpointURL(endpoint))
+
+	// Note: otlploghttp.New behaves differently than trace/metric exporters.
+	// It doesn't automatically append /v1/logs when using WithEndpointURL.
+	// We need to manually append the path or use WithEndpoint + WithURLPath.
+	logEndpoint := endpoint + "/v1/logs"
+	return otlploghttp.New(expCtx, otlploghttp.WithEndpointURL(logEndpoint))
 }
 
 type responseRecorder struct {
