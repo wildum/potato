@@ -388,7 +388,71 @@ go build -o potato-service
 ./potato-service
 ```
 
-The service runs on port 8080 by default.
+The service runs on port 8081 by default.
+
+## Observability with OpenTelemetry (OTLP)
+
+The application exports traces, metrics, and logs through the OpenTelemetry Go SDK. Every HTTP route is wrapped with `otelhttp`, handlers create domain-level spans, request metrics (count, latency, errors) are recorded, and structured logs automatically include trace and span IDs.
+
+### Environment variables
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`): OTLP HTTP endpoint that receives traces, metrics, and logs.
+- `OTEL_SERVICE_NAME` (default `potato`): Logical service name used in resource attributes.
+- `OTEL_SERVICE_VERSION` (default `1.0.0`): Service version reported to backends; override to match your release tag.
+- `DEPLOYMENT_ENVIRONMENT` (default `development`): Populates the `deployment.environment` resource attribute.
+- `OTEL_RESOURCE_ATTRIBUTES`: Comma-separated `key=value` pairs that override or extend resource attributes (for example `team=infra,region=us-west-2`).
+
+### Run the API with OTLP enabled
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+OTEL_SERVICE_NAME=potato-api \
+OTEL_SERVICE_VERSION=1.2.3 \
+OTEL_RESOURCE_ATTRIBUTES="deployment.environment=local,team=demo" \
+go run main.go
+```
+
+This will:
+
+- Bootstrap OTLP/HTTP exporters for traces, metrics, and logs.
+- Automatically start spans for every HTTP request plus nested spans in key handlers.
+- Emit request metrics (`http.server.requests`, `http.server.request_duration_ms`, `http.server.errors`).
+- Produce structured logs that include `trace_id`/`span_id`, route, status code, and latency.
+
+### Send telemetry to a local Grafana Alloy collector
+
+1. Create a minimal Alloy config (save as `alloy-config.alloy`):
+
+   ```
+   otelcol.receiver.otlp "http" {
+     protocols = { http = { endpoint = "0.0.0.0:4318" } }
+   }
+
+   otelcol.exporter.logging "stdout" {}
+
+   otelcol.processor.batch "default" {}
+
+   otelcol.service "pipeline" {
+     pipelines = {
+       logs    = { receivers = [otelcol.receiver.otlp.http], processors = [otelcol.processor.batch.default], exporters = [otelcol.exporter.logging.stdout] },
+       metrics = { receivers = [otelcol.receiver.otlp.http], processors = [otelcol.processor.batch.default], exporters = [otelcol.exporter.logging.stdout] },
+       traces  = { receivers = [otelcol.receiver.otlp.http], processors = [otelcol.processor.batch.default], exporters = [otelcol.exporter.logging.stdout] },
+     }
+   }
+   ```
+
+2. Start Alloy with the config:
+
+   ```bash
+   docker run --rm -it \
+     -p 4318:4318 \
+     -v $(pwd)/alloy-config.alloy:/etc/alloy/config.alloy \
+     grafana/alloy:latest run /etc/alloy/config.alloy
+   ```
+
+3. Launch the Potato service pointing to Alloy (defaults already match `http://localhost:4318`; override if you expose Alloy elsewhere).
+
+Telemetry will now appear in Alloy’s logs (or whichever exporter you configure) and can be forwarded to Grafana Cloud or other observability backends.
 
 ## License
 
