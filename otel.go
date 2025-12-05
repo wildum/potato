@@ -271,6 +271,8 @@ func (o *Observability) recordRequest(ctx context.Context, route, method string,
 		return
 	}
 
+	route = normalizeRouteName(route, method)
+
 	// Combine HTTP-specific attributes with common discovery labels
 	attrs := []attribute.KeyValue{
 		attribute.String("http.route", route),
@@ -334,6 +336,26 @@ func (o *Observability) logRequest(ctx context.Context, route, method string, st
 	}
 
 	o.logger.Emit(ctx, record)
+}
+
+func normalizeRouteName(route, method string) string {
+	route = strings.TrimSpace(route)
+	method = strings.TrimSpace(method)
+
+	if route == "" || method == "" {
+		return route
+	}
+
+	fields := strings.Fields(route)
+	if len(fields) <= 1 {
+		return route
+	}
+
+	if strings.EqualFold(fields[0], method) {
+		return strings.Join(fields[1:], " ")
+	}
+
+	return route
 }
 
 func (o *Observability) RecordInventory(ctx context.Context, variety string, count int) {
