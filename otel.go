@@ -62,6 +62,9 @@ type Observability struct {
 
 	logger      logapi.Logger
 	serviceName string
+
+	// Common attributes to attach to all metrics
+	commonAttrs []attribute.KeyValue
 }
 
 func initOpenTelemetry(ctx context.Context) (*Observability, error) {
@@ -101,12 +104,12 @@ func initOpenTelemetry(ctx context.Context) (*Observability, error) {
 	reader := sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(defaultMetricExportFreq))
 	requestDurationView := sdkmetric.NewView(
 		sdkmetric.Instrument{
-			Name: "http.server.request_duration_ms",
+			Name: "http.server.duration",
 			Kind: sdkmetric.InstrumentKindHistogram,
 		},
 		sdkmetric.Stream{
 			Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
-				Boundaries: []float64{5, 10, 25, 50, 100, 250, 500, 1000, 2000, 5000},
+				Boundaries: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
 				NoMinMax:   false,
 			},
 		},
@@ -135,9 +138,9 @@ func initOpenTelemetry(ctx context.Context) (*Observability, error) {
 	}
 
 	requestDuration, err := meter.Float64Histogram(
-		"http.server.request_duration_ms",
-		metric.WithDescription("Distribution of HTTP request latency in milliseconds"),
-		metric.WithUnit("ms"),
+		"http.server.duration",
+		metric.WithDescription("Duration of HTTP requests in seconds"),
+		metric.WithUnit("s"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create request duration histogram: %w", err)
@@ -176,6 +179,21 @@ func initOpenTelemetry(ctx context.Context) (*Observability, error) {
 		return nil, fmt.Errorf("create recipe views counter: %w", err)
 	}
 
+	// Get hostname for service instance id
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "localhost"
+	}
+
+	// Create common attributes for discovery query matching
+	commonAttrs := []attribute.KeyValue{
+		attribute.String("service_name", cfg.ServiceName),
+		attribute.String("service_namespace", "local"),
+		attribute.String("service_instance_id", hostname+":8081"),
+		attribute.String("project", "potato-demo"),
+		attribute.String("component", "api"),
+	}
+
 	telemetry := &Observability{
 		tracerProvider:  tracerProvider,
 		meterProvider:   meterProvider,
@@ -188,6 +206,7 @@ func initOpenTelemetry(ctx context.Context) (*Observability, error) {
 		recipeViews:     recipeViews,
 		logger:          loggerProvider.Logger(instrumentationName),
 		serviceName:     cfg.ServiceName,
+		commonAttrs:     commonAttrs,
 	}
 
 	return telemetry, nil
@@ -252,19 +271,21 @@ func (o *Observability) recordRequest(ctx context.Context, route, method string,
 		return
 	}
 
+	// Combine HTTP-specific attributes with common discovery labels
 	attrs := []attribute.KeyValue{
 		attribute.String("http.route", route),
 		attribute.String("http.method", method),
 		attribute.Int("http.status_code", status),
-		attribute.String("service.name", o.serviceName),
 	}
+	// Append common attributes
+	attrs = append(attrs, o.commonAttrs...)
 
 	if o.requestCounter != nil {
 		o.requestCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
 	}
 
 	if o.requestDuration != nil {
-		o.requestDuration.Record(ctx, float64(duration.Milliseconds()), metric.WithAttributes(attrs...))
+		o.requestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(attrs...))
 	}
 
 	if o.errorCounter != nil && status >= http.StatusBadRequest {
@@ -320,7 +341,7 @@ func (o *Observability) RecordInventory(ctx context.Context, variety string, cou
 		return
 	}
 	o.inventoryLevel.Record(ctx, int64(count),
-		metric.WithAttributes(attribute.String("potato.variety", variety)))
+		metric.WithAttributes(attribute.String("potato.variety", sanitizeVariety(variety))))
 }
 
 func (o *Observability) RecordFreshness(ctx context.Context, variety string, freshness float64) {
@@ -328,7 +349,30 @@ func (o *Observability) RecordFreshness(ctx context.Context, variety string, fre
 		return
 	}
 	o.potatoFreshness.Record(ctx, freshness,
-		metric.WithAttributes(attribute.String("potato.variety", variety)))
+		metric.WithAttributes(attribute.String("potato.variety", sanitizeVariety(variety))))
+}
+
+// sanitizeVariety ensures variety labels have bounded cardinality
+func sanitizeVariety(variety string) string {
+	// Limit length to prevent label explosion
+	if len(variety) > 50 {
+		return "invalid_variety"
+	}
+
+	// Known valid varieties
+	validVarieties := map[string]bool{
+		"Russet":        true,
+		"Yukon Gold":    true,
+		"Red Potato":    true,
+		"Fingerling":    true,
+		"Purple Potato": true,
+		"Sweet Potato":  true,
+	}
+
+	if validVarieties[variety] {
+		return variety
+	}
+	return "other"
 }
 
 func (o *Observability) RecordRecipeView(ctx context.Context, recipeID, recipeName string) {
@@ -363,10 +407,24 @@ func loadTelemetryConfig() telemetryConfig {
 }
 
 func buildResource(ctx context.Context, cfg telemetryConfig) (*resource.Resource, error) {
+	// Get hostname for service instance id
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "localhost"
+	}
+
 	base := []attribute.KeyValue{
+		// Standard semantic conventions
 		attribute.String("service.name", cfg.ServiceName),
 		attribute.String("service.version", cfg.ServiceVersion),
 		attribute.String("deployment.environment", cfg.Environment),
+
+		// Discovery query labels (minimal set)
+		attribute.String("service_name", cfg.ServiceName),
+		attribute.String("service_namespace", "local"),
+		attribute.String("service_instance_id", hostname+":8081"),
+		attribute.String("project", "potato-demo"),
+		attribute.String("component", "api"),
 	}
 
 	attrs := mergeAttributes(base, cfg.ExtraAttributes)
