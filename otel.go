@@ -252,6 +252,8 @@ func (o *Observability) recordRequest(ctx context.Context, route, method string,
 		return
 	}
 
+	route = normalizeRoute(route, method)
+
 	attrs := []attribute.KeyValue{
 		attribute.String("http.route", route),
 		attribute.String("http.method", method),
@@ -272,6 +274,19 @@ func (o *Observability) recordRequest(ctx context.Context, route, method string,
 	}
 
 	o.logRequest(ctx, route, method, status, duration)
+}
+
+func normalizeRoute(route, method string) string {
+	if route == "" || method == "" {
+		return route
+	}
+
+	prefix := method + " "
+	if strings.HasPrefix(route, prefix) {
+		return strings.TrimPrefix(route, prefix)
+	}
+
+	return route
 }
 
 func (o *Observability) logRequest(ctx context.Context, route, method string, status int, duration time.Duration) {
