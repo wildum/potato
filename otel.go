@@ -252,8 +252,10 @@ func (o *Observability) recordRequest(ctx context.Context, route, method string,
 		return
 	}
 
+	cleanRoute := normalizeRoute(route, method)
+
 	attrs := []attribute.KeyValue{
-		attribute.String("http.route", route),
+		attribute.String("http.route", cleanRoute),
 		attribute.String("http.method", method),
 		attribute.Int("http.status_code", status),
 		attribute.String("service.name", o.serviceName),
@@ -271,7 +273,7 @@ func (o *Observability) recordRequest(ctx context.Context, route, method string,
 		o.errorCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
 	}
 
-	o.logRequest(ctx, route, method, status, duration)
+	o.logRequest(ctx, cleanRoute, method, status, duration)
 }
 
 func (o *Observability) logRequest(ctx context.Context, route, method string, status int, duration time.Duration) {
@@ -313,6 +315,31 @@ func (o *Observability) logRequest(ctx context.Context, route, method string, st
 	}
 
 	o.logger.Emit(ctx, record)
+}
+
+func normalizeRoute(route, method string) string {
+	trimmedRoute := strings.TrimSpace(route)
+	if trimmedRoute == "" {
+		return "/"
+	}
+
+	method = strings.ToUpper(strings.TrimSpace(method))
+	if method == "" {
+		return trimmedRoute
+	}
+
+	prefixLen := len(method)
+	if len(trimmedRoute) > prefixLen && strings.EqualFold(trimmedRoute[:prefixLen], method) {
+		if trimmedRoute[prefixLen] == ' ' {
+			remaining := strings.TrimSpace(trimmedRoute[prefixLen+1:])
+			if remaining == "" {
+				return "/"
+			}
+			return remaining
+		}
+	}
+
+	return trimmedRoute
 }
 
 func (o *Observability) RecordInventory(ctx context.Context, variety string, count int) {
