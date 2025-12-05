@@ -252,8 +252,10 @@ func (o *Observability) recordRequest(ctx context.Context, route, method string,
 		return
 	}
 
+	cleanRoute := normalizeRouteName(route, method)
+
 	attrs := []attribute.KeyValue{
-		attribute.String("http.route", route),
+		attribute.String("http.route", cleanRoute),
 		attribute.String("http.method", method),
 		attribute.Int("http.status_code", status),
 		attribute.String("service.name", o.serviceName),
@@ -271,7 +273,7 @@ func (o *Observability) recordRequest(ctx context.Context, route, method string,
 		o.errorCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
 	}
 
-	o.logRequest(ctx, route, method, status, duration)
+	o.logRequest(ctx, cleanRoute, method, status, duration)
 }
 
 func (o *Observability) logRequest(ctx context.Context, route, method string, status int, duration time.Duration) {
@@ -313,6 +315,20 @@ func (o *Observability) logRequest(ctx context.Context, route, method string, st
 	}
 
 	o.logger.Emit(ctx, record)
+}
+
+func normalizeRouteName(route, method string) string {
+	route = strings.TrimSpace(route)
+	if route == "" || method == "" {
+		return route
+	}
+
+	fields := strings.Fields(route)
+	if len(fields) > 1 && strings.EqualFold(fields[0], method) {
+		return strings.Join(fields[1:], " ")
+	}
+
+	return route
 }
 
 func (o *Observability) RecordInventory(ctx context.Context, variety string, count int) {
