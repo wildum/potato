@@ -39,17 +39,21 @@ func main() {
 	store := storage.NewInMemoryStorage()
 	seedData(store)
 
-	worker := background.NewWorker(store, telemetry.Logger())
+	telemetry.EmitInfoLog(ctx, "Potato service starting up")
+
+	worker := background.NewWorker(store, telemetry)
 	worker.StartPotatoGenerator(3 * time.Second)
 	worker.StartRecipeGenerator(8 * time.Second)
 	worker.StartQualityDegradation(20 * time.Second)
-	worker.StartPotatoRemover(10 * time.Second)
+	worker.StartPotatoRemover(5 * time.Second)
+
+	telemetry.EmitDebugLog(ctx, "Background workers started")
 
 	potatoService := service.NewPotatoService(store)
 	recipeService := service.NewRecipeService(store)
 
-	potatoHandler := handlers.NewPotatoHandler(potatoService, telemetry)
-	recipeHandler := handlers.NewRecipeHandler(recipeService, telemetry)
+	potatoHandler := handlers.NewPotatoHandler(potatoService, telemetry, telemetry)
+	recipeHandler := handlers.NewRecipeHandler(recipeService, telemetry, telemetry)
 
 	r := mux.NewRouter()
 	api := r.PathPrefix("/api/v1").Subrouter()

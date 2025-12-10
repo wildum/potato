@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	logapi "go.opentelemetry.io/otel/log"
 )
 
 var potatoTracer = otel.Tracer("github.com/williamdumont/potato-demo/handlers/potato")
@@ -19,12 +21,19 @@ var potatoTracer = otel.Tracer("github.com/williamdumont/potato-demo/handlers/po
 type PotatoHandler struct {
 	service   *service.PotatoService
 	telemetry TelemetryRecorder
+	obs       ObservabilityLogger
 }
 
-func NewPotatoHandler(service *service.PotatoService, telemetry TelemetryRecorder) *PotatoHandler {
+type ObservabilityLogger interface {
+	EmitDebugLog(ctx context.Context, message string, attrs ...logapi.KeyValue)
+	EmitInfoLog(ctx context.Context, message string, attrs ...logapi.KeyValue)
+}
+
+func NewPotatoHandler(service *service.PotatoService, telemetry TelemetryRecorder, obs ObservabilityLogger) *PotatoHandler {
 	return &PotatoHandler{
 		service:   service,
 		telemetry: telemetry,
+		obs:       obs,
 	}
 }
 
@@ -41,11 +50,22 @@ func (h *PotatoHandler) CreatePotato(w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(attribute.String("potato.variety", potato.Variety))
 	defer r.Body.Close()
 
+	if h.obs != nil {
+		h.obs.EmitDebugLog(r.Context(), "Creating new potato", 
+			logapi.String("variety", potato.Variety),
+			logapi.Float64("weight", potato.Weight))
+	}
+
 	createdPotato, err := h.service.CreatePotato(potato)
 	if err != nil {
 		recordSpanError(span, err, "validation_error", "client_error", err.Error())
 		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	if h.obs != nil {
+		h.obs.EmitInfoLog(r.Context(), "Potato created successfully", 
+			logapi.String("potato_id", createdPotato.ID))
 	}
 
 	span.SetAttributes(attribute.String("potato.id", createdPotato.ID))
@@ -91,6 +111,15 @@ func (h *PotatoHandler) GetAllPotatoes(w http.ResponseWriter, r *http.Request) {
 		span.SetAttributes(attribute.String("potato.variety", variety))
 	}
 
+	if h.obs != nil {
+		if variety != "" {
+			h.obs.EmitDebugLog(r.Context(), "Fetching potatoes by variety", 
+				logapi.String("variety", variety))
+		} else {
+			h.obs.EmitDebugLog(r.Context(), "Fetching all potatoes")
+		}
+	}
+
 	var potatoes []models.Potato
 	if variety != "" {
 		potatoes = h.service.GetPotatoesByVariety(variety)
@@ -110,6 +139,11 @@ func (h *PotatoHandler) UpdatePotato(w http.ResponseWriter, r *http.Request) {
 	_, span := potatoTracer.Start(r.Context(), "PotatoHandler.UpdatePotato")
 	defer span.End()
 	span.SetAttributes(attribute.String("potato.id", id))
+
+	if h.obs != nil {
+		h.obs.EmitDebugLog(r.Context(), "Updating potato", 
+			logapi.String("potato_id", id))
+	}
 
 	var potato models.Potato
 	if err := json.NewDecoder(r.Body).Decode(&potato); err != nil {
@@ -136,6 +170,11 @@ func (h *PotatoHandler) UpdatePotato(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.obs != nil {
+		h.obs.EmitInfoLog(r.Context(), "Potato updated successfully", 
+			logapi.String("potato_id", id))
+	}
+
 	span.SetStatus(codes.Ok, "potato updated")
 	respondWithJSON(w, http.StatusOK, updatedPotato)
 }
@@ -147,6 +186,11 @@ func (h *PotatoHandler) DeletePotato(w http.ResponseWriter, r *http.Request) {
 	_, span := potatoTracer.Start(r.Context(), "PotatoHandler.DeletePotato")
 	defer span.End()
 	span.SetAttributes(attribute.String("potato.id", id))
+
+	if h.obs != nil {
+		h.obs.EmitDebugLog(r.Context(), "Deleting potato", 
+			logapi.String("potato_id", id))
+	}
 
 	if err := h.service.DeletePotato(id); err != nil {
 		status := http.StatusInternalServerError
@@ -164,6 +208,11 @@ func (h *PotatoHandler) DeletePotato(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.obs != nil {
+		h.obs.EmitInfoLog(r.Context(), "Potato deleted successfully", 
+			logapi.String("potato_id", id))
+	}
+
 	span.SetStatus(codes.Ok, "potato deleted")
 	respondWithJSON(w, http.StatusOK, map[string]string{"result": "success"})
 }
@@ -171,6 +220,10 @@ func (h *PotatoHandler) DeletePotato(w http.ResponseWriter, r *http.Request) {
 func (h *PotatoHandler) GetInventory(w http.ResponseWriter, r *http.Request) {
 	_, span := potatoTracer.Start(r.Context(), "PotatoHandler.GetInventory")
 	defer span.End()
+
+	if h.obs != nil {
+		h.obs.EmitDebugLog(r.Context(), "Processing inventory request")
+	}
 
 	summary := h.service.GetInventorySummary()
 	span.SetAttributes(
@@ -190,6 +243,10 @@ func (h *PotatoHandler) GetAnalytics(w http.ResponseWriter, r *http.Request) {
 	_, span := potatoTracer.Start(r.Context(), "PotatoHandler.GetAnalytics")
 	defer span.End()
 
+	if h.obs != nil {
+		h.obs.EmitDebugLog(r.Context(), "Calculating analytics")
+	}
+
 	analytics := h.service.GetAnalytics()
 	if analytics.MostPopularVariety != "" {
 		span.SetAttributes(attribute.String("analytics.most_popular", analytics.MostPopularVariety))
@@ -205,6 +262,10 @@ func (h *PotatoHandler) CheckFreshness(w http.ResponseWriter, r *http.Request) {
 	_, span := potatoTracer.Start(r.Context(), "PotatoHandler.CheckFreshness")
 	defer span.End()
 	span.SetAttributes(attribute.String("potato.id", id))
+
+	if h.obs != nil {
+		h.obs.EmitDebugLog(r.Context(), "Checking freshness for potato")
+	}
 
 	potato, err := h.service.GetPotato(id)
 	if err != nil {

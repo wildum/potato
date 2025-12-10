@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	logapi "go.opentelemetry.io/otel/log"
 )
 
 var recipeTracer = otel.Tracer("github.com/williamdumont/potato-demo/handlers/recipe")
@@ -18,12 +19,14 @@ var recipeTracer = otel.Tracer("github.com/williamdumont/potato-demo/handlers/re
 type RecipeHandler struct {
 	service   *service.RecipeService
 	telemetry TelemetryRecorder
+	obs       ObservabilityLogger
 }
 
-func NewRecipeHandler(service *service.RecipeService, telemetry TelemetryRecorder) *RecipeHandler {
+func NewRecipeHandler(service *service.RecipeService, telemetry TelemetryRecorder, obs ObservabilityLogger) *RecipeHandler {
 	return &RecipeHandler{
 		service:   service,
 		telemetry: telemetry,
+		obs:       obs,
 	}
 }
 
@@ -40,11 +43,22 @@ func (h *RecipeHandler) CreateRecipe(w http.ResponseWriter, r *http.Request) {
 	span.SetAttributes(attribute.String("recipe.name", recipe.Name))
 	defer r.Body.Close()
 
+	if h.obs != nil {
+		h.obs.EmitDebugLog(r.Context(), "Creating new recipe", 
+			logapi.String("recipe_name", recipe.Name),
+			logapi.String("variety", recipe.Variety))
+	}
+
 	createdRecipe, err := h.service.CreateRecipe(recipe)
 	if err != nil {
 		recordSpanError(span, err, "validation_error", "client_error", err.Error())
 		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	if h.obs != nil {
+		h.obs.EmitInfoLog(r.Context(), "Recipe created successfully", 
+			logapi.String("recipe_id", createdRecipe.ID))
 	}
 
 	span.SetAttributes(attribute.String("recipe.id", createdRecipe.ID))
@@ -122,6 +136,12 @@ func (h *RecipeHandler) RecommendRecipe(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if h.obs != nil {
+		h.obs.EmitDebugLog(r.Context(), "Recommending recipe", 
+			logapi.String("variety", variety),
+			logapi.String("difficulty", difficulty))
+	}
+
 	recipe, err := h.service.RecommendRecipe(variety, difficulty)
 	if err != nil {
 		errType := "not_found"
@@ -133,6 +153,12 @@ func (h *RecipeHandler) RecommendRecipe(w http.ResponseWriter, r *http.Request) 
 		recordSpanError(span, err, errType, errCategory, err.Error())
 		respondWithError(w, http.StatusNotFound, err.Error())
 		return
+	}
+
+	if h.obs != nil {
+		h.obs.EmitInfoLog(r.Context(), "Recipe recommended", 
+			logapi.String("recipe_id", recipe.ID),
+			logapi.String("recipe_name", recipe.Name))
 	}
 
 	span.SetAttributes(attribute.String("recipe.id", recipe.ID))

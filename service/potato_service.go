@@ -28,15 +28,15 @@ func (s *PotatoService) CreatePotato(potato models.Potato) (models.Potato, error
 	if err := s.validatePotato(potato); err != nil {
 		return models.Potato{}, err
 	}
-	
+
 	if potato.HarvestDate.IsZero() {
 		potato.HarvestDate = time.Now()
 	}
-	
+
 	if err := s.storage.AddPotato(potato); err != nil {
 		return models.Potato{}, err
 	}
-	
+
 	return potato, nil
 }
 
@@ -52,11 +52,11 @@ func (s *PotatoService) UpdatePotato(id string, potato models.Potato) (models.Po
 	if err := s.validatePotato(potato); err != nil {
 		return models.Potato{}, err
 	}
-	
+
 	if err := s.storage.UpdatePotato(id, potato); err != nil {
 		return models.Potato{}, err
 	}
-	
+
 	return potato, nil
 }
 
@@ -70,15 +70,15 @@ func (s *PotatoService) GetPotatoesByVariety(variety string) []models.Potato {
 
 func (s *PotatoService) GetInventorySummary() models.InventorySummary {
 	potatoes := s.storage.GetAllPotatoes()
-	
+
 	varietyMap := make(map[string]*models.InventoryItem)
 	totalWeight := 0.0
 	totalValue := 0.0
-	
+
 	for _, potato := range potatoes {
 		totalWeight += potato.Weight
 		totalValue += potato.Price
-		
+
 		if item, exists := varietyMap[potato.Variety]; exists {
 			item.TotalQuantity++
 			item.TotalWeight += potato.Weight
@@ -92,12 +92,12 @@ func (s *PotatoService) GetInventorySummary() models.InventorySummary {
 			}
 		}
 	}
-	
+
 	byVariety := make([]models.InventoryItem, 0, len(varietyMap))
 	for _, item := range varietyMap {
 		byVariety = append(byVariety, *item)
 	}
-	
+
 	return models.InventorySummary{
 		TotalPotatoes: len(potatoes),
 		TotalWeight:   totalWeight,
@@ -108,16 +108,16 @@ func (s *PotatoService) GetInventorySummary() models.InventorySummary {
 
 func (s *PotatoService) GetAnalytics() models.PotatoAnalytics {
 	potatoes := s.storage.GetAllPotatoes()
-	
+
 	if len(potatoes) == 0 {
 		return models.PotatoAnalytics{}
 	}
-	
+
 	varietyCount := make(map[string]int)
 	totalWeight := 0.0
 	premiumCount := 0
 	totalValue := 0.0
-	
+
 	for _, potato := range potatoes {
 		varietyCount[potato.Variety]++
 		totalWeight += potato.Weight
@@ -126,7 +126,7 @@ func (s *PotatoService) GetAnalytics() models.PotatoAnalytics {
 			premiumCount++
 		}
 	}
-	
+
 	mostPopular := ""
 	maxCount := 0
 	for variety, count := range varietyCount {
@@ -135,7 +135,7 @@ func (s *PotatoService) GetAnalytics() models.PotatoAnalytics {
 			mostPopular = variety
 		}
 	}
-	
+
 	return models.PotatoAnalytics{
 		MostPopularVariety: mostPopular,
 		AverageWeight:      totalWeight / float64(len(potatoes)),
@@ -146,7 +146,7 @@ func (s *PotatoService) GetAnalytics() models.PotatoAnalytics {
 
 func (s *PotatoService) CalculateFreshness(potato models.Potato) string {
 	daysSinceHarvest := int(time.Since(potato.HarvestDate).Hours() / 24)
-	
+
 	switch {
 	case daysSinceHarvest <= 7:
 		return "Fresh"
@@ -163,15 +163,14 @@ func (s *PotatoService) validatePotato(potato models.Potato) error {
 	if potato.ID == "" || potato.Variety == "" {
 		return ErrInvalidPotato
 	}
-	
+
 	if potato.Weight <= 0 {
 		return ErrInvalidWeight
 	}
-	
+
 	if potato.Price < 0 {
 		return ErrInvalidPrice
 	}
-	
+
 	return nil
 }
-

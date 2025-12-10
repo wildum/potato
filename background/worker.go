@@ -3,6 +3,7 @@ package background
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 	"time"
 
@@ -21,11 +22,6 @@ var fakeUserEmails = []string{
 	"emma.taylor@business.com",
 	"admin@potato-warehouse.internal",
 	"support@freshpotatoes.com",
-}
-
-// Logger interface for OTLP logging
-type Logger interface {
-	Emit(ctx context.Context, record logapi.Record)
 }
 
 var (
@@ -50,6 +46,11 @@ var (
 type Worker struct {
 	storage storage.Storage
 	logger  Logger
+}
+
+type Logger interface {
+	EmitDebugLog(ctx context.Context, message string, attrs ...logapi.KeyValue)
+	EmitInfoLog(ctx context.Context, message string, attrs ...logapi.KeyValue)
 }
 
 func NewWorker(storage storage.Storage, logger Logger) *Worker {
@@ -101,58 +102,33 @@ func (w *Worker) removeRandomPotatoes() {
 		return
 	}
 
-	// Pick a random variety to simulate a sale
-	targetVariety := varieties[rand.Intn(len(varieties))]
+	// Remove 1-3 random potatoes
+	numToRemove := 1 + rand.Intn(3)
+	if numToRemove > len(potatoes) {
+		numToRemove = len(potatoes)
+	}
 
-	// Filter potatoes by the target variety
-	var varietyPotatoes []models.Potato
-	for _, p := range potatoes {
-		if p.Variety == targetVariety {
-			varietyPotatoes = append(varietyPotatoes, p)
+	// Shuffle to pick random potatoes
+	rand.Shuffle(len(potatoes), func(i, j int) {
+		potatoes[i], potatoes[j] = potatoes[j], potatoes[i]
+	})
+
+	for i := 0; i < numToRemove; i++ {
+		potato := potatoes[i]
+		err := w.storage.DeletePotato(potato.ID)
+		if err == nil {
+			// Simulate a log with sensitive data (for exercise purposes)
+			userEmail := fakeUserEmails[rand.Intn(len(fakeUserEmails))]
+			log.Printf("Inventory adjustment: Removed potato %s (%s, %.2fkg) from inventory. Processed by user: %s, action_id: INV-%d",
+				potato.ID, potato.Variety, potato.Weight, userEmail, rand.Intn(99999))
+
+			if w.logger != nil {
+				w.logger.EmitDebugLog(context.Background(), "Background worker removed potato",
+					logapi.String("potato_id", potato.ID),
+					logapi.String("variety", potato.Variety))
+			}
 		}
 	}
-
-	if len(varietyPotatoes) == 0 {
-		return
-	}
-
-	// Remove only 1 potato of this variety to simulate a single sale
-	potato := varietyPotatoes[rand.Intn(len(varietyPotatoes))]
-	err := w.storage.DeletePotato(potato.ID)
-	if err == nil {
-		// Simulate a log with sensitive data (for exercise purposes)
-		userEmail := fakeUserEmails[rand.Intn(len(fakeUserEmails))]
-		w.logSale(potato, userEmail)
-	}
-}
-
-func (w *Worker) logSale(potato models.Potato, userEmail string) {
-	if w.logger == nil {
-		return
-	}
-
-	ctx := context.Background()
-	record := logapi.Record{}
-	record.SetTimestamp(time.Now())
-	record.SetSeverity(logapi.SeverityInfo)
-	record.SetSeverityText("INFO")
-	record.SetBody(logapi.StringValue(fmt.Sprintf(
-		"Sale completed: %s potato sold (%.2fkg, $%.2f). Customer: %s",
-		potato.Variety, potato.Weight, potato.Price, userEmail,
-	)))
-
-	record.AddAttributes(
-		logapi.String("event.type", "sale"),
-		logapi.String("potato.id", potato.ID),
-		logapi.String("potato.variety", potato.Variety),
-		logapi.Float64("potato.weight_kg", potato.Weight),
-		logapi.Float64("potato.price", potato.Price),
-		logapi.String("potato.quality", potato.Quality),
-		logapi.String("customer.email", userEmail),
-		logapi.Int("transaction.id", rand.Intn(99999)),
-	)
-
-	w.logger.Emit(ctx, record)
 }
 
 func (w *Worker) addRandomPotato() {
@@ -186,6 +162,13 @@ func (w *Worker) addRandomPotato() {
 	}
 
 	w.storage.AddPotato(potato)
+
+	if w.logger != nil {
+		w.logger.EmitDebugLog(context.Background(), "Background worker added potato",
+			logapi.String("potato_id", id),
+			logapi.String("variety", variety),
+			logapi.String("quality", quality))
+	}
 }
 
 func (w *Worker) addRandomRecipe() {
@@ -215,10 +198,18 @@ func (w *Worker) addRandomRecipe() {
 	}
 
 	w.storage.AddRecipe(recipe)
+
+	if w.logger != nil {
+		w.logger.EmitDebugLog(context.Background(), "Background worker added recipe",
+			logapi.String("recipe_id", id),
+			logapi.String("recipe_name", name),
+			logapi.String("variety", variety))
+	}
 }
 
 func (w *Worker) degradePotatoQuality() {
 	potatoes := w.storage.GetAllPotatoes()
+	degradedCount := 0
 
 	for _, potato := range potatoes {
 		daysSinceHarvest := int(time.Since(potato.HarvestDate).Hours() / 24)
@@ -226,10 +217,17 @@ func (w *Worker) degradePotatoQuality() {
 		if daysSinceHarvest > 30 && potato.Quality == string(models.Premium) {
 			potato.Quality = string(models.Standard)
 			w.storage.UpdatePotato(potato.ID, potato)
+			degradedCount++
 		} else if daysSinceHarvest > 60 && potato.Quality == string(models.Standard) {
 			potato.Quality = string(models.Economy)
 			w.storage.UpdatePotato(potato.ID, potato)
+			degradedCount++
 		}
+	}
+
+	if degradedCount > 0 && w.logger != nil {
+		w.logger.EmitDebugLog(context.Background(), "Background worker degraded potato quality",
+			logapi.Int("count", degradedCount))
 	}
 }
 

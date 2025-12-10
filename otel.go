@@ -415,6 +415,69 @@ func (o *Observability) Logger() logapi.Logger {
 	return o.logger
 }
 
+// EmitDebugLog emits a debug-level log via OTLP
+func (o *Observability) EmitDebugLog(ctx context.Context, message string, attrs ...logapi.KeyValue) {
+	if o == nil || o.logger == nil {
+		return
+	}
+
+	record := logapi.Record{}
+	record.SetTimestamp(time.Now())
+	record.SetBody(logapi.StringValue(message))
+	record.SetSeverity(logapi.SeverityDebug)
+	record.SetSeverityText("DEBUG")
+
+	// Add service name by default
+	record.AddAttributes(logapi.String("service.name", o.serviceName))
+
+	// Add trace context if available
+	if span := trace.SpanFromContext(ctx); span != nil {
+		if sc := span.SpanContext(); sc.IsValid() {
+			record.AddAttributes(
+				logapi.String("trace_id", sc.TraceID().String()),
+				logapi.String("span_id", sc.SpanID().String()),
+			)
+		}
+	}
+
+	// Add any custom attributes
+	if len(attrs) > 0 {
+		record.AddAttributes(attrs...)
+	}
+
+	o.logger.Emit(ctx, record)
+}
+
+// EmitInfoLog emits an info-level log via OTLP
+func (o *Observability) EmitInfoLog(ctx context.Context, message string, attrs ...logapi.KeyValue) {
+	if o == nil || o.logger == nil {
+		return
+	}
+
+	record := logapi.Record{}
+	record.SetTimestamp(time.Now())
+	record.SetBody(logapi.StringValue(message))
+	record.SetSeverity(logapi.SeverityInfo)
+	record.SetSeverityText("INFO")
+
+	record.AddAttributes(logapi.String("service.name", o.serviceName))
+
+	if span := trace.SpanFromContext(ctx); span != nil {
+		if sc := span.SpanContext(); sc.IsValid() {
+			record.AddAttributes(
+				logapi.String("trace_id", sc.TraceID().String()),
+				logapi.String("span_id", sc.SpanID().String()),
+			)
+		}
+	}
+
+	if len(attrs) > 0 {
+		record.AddAttributes(attrs...)
+	}
+
+	o.logger.Emit(ctx, record)
+}
+
 func loadTelemetryConfig() telemetryConfig {
 	cfg := telemetryConfig{
 		Endpoint:       getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", defaultOTLPEndpoint),

@@ -25,11 +25,11 @@ func (s *RecipeService) CreateRecipe(recipe models.Recipe) (models.Recipe, error
 	if err := s.validateRecipe(recipe); err != nil {
 		return models.Recipe{}, err
 	}
-	
+
 	if err := s.storage.AddRecipe(recipe); err != nil {
 		return models.Recipe{}, err
 	}
-	
+
 	return recipe, nil
 }
 
@@ -47,17 +47,17 @@ func (s *RecipeService) GetRecipesByVariety(variety string) []models.Recipe {
 
 func (s *RecipeService) RecommendRecipe(variety string, difficulty string) (models.Recipe, error) {
 	recipes := s.storage.GetRecipesByVariety(variety)
-	
+
 	for _, recipe := range recipes {
 		if difficulty == "" || recipe.Difficulty == difficulty {
 			return recipe, nil
 		}
 	}
-	
+
 	if len(recipes) > 0 {
 		return recipes[0], nil
 	}
-	
+
 	return models.Recipe{}, errors.New("no recipes found for variety")
 }
 
@@ -65,11 +65,10 @@ func (s *RecipeService) validateRecipe(recipe models.Recipe) error {
 	if recipe.ID == "" || recipe.Name == "" || recipe.Variety == "" {
 		return ErrInvalidRecipe
 	}
-	
+
 	if recipe.CookingTime <= 0 {
 		return errors.New("cooking time must be positive")
 	}
-	
+
 	return nil
 }
-
