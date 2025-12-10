@@ -408,6 +408,13 @@ func (o *Observability) RecordRecipeView(ctx context.Context, recipeID, recipeNa
 		))
 }
 
+func (o *Observability) Logger() logapi.Logger {
+	if o == nil {
+		return nil
+	}
+	return o.logger
+}
+
 func loadTelemetryConfig() telemetryConfig {
 	cfg := telemetryConfig{
 		Endpoint:       getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", defaultOTLPEndpoint),

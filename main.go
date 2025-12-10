@@ -39,10 +39,11 @@ func main() {
 	store := storage.NewInMemoryStorage()
 	seedData(store)
 
-	worker := background.NewWorker(store)
+	worker := background.NewWorker(store, telemetry.Logger())
 	worker.StartPotatoGenerator(3 * time.Second)
 	worker.StartRecipeGenerator(8 * time.Second)
 	worker.StartQualityDegradation(20 * time.Second)
+	worker.StartPotatoRemover(10 * time.Second)
 
 	potatoService := service.NewPotatoService(store)
 	recipeService := service.NewRecipeService(store)
