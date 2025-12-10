@@ -11,7 +11,8 @@ import (
 	logapi "go.opentelemetry.io/otel/log"
 )
 
-// Fake user emails for demo/exercise purposes (simulating sensitive data leak)
+// fakeUserEmails contains sample user emails for demo/exercise purposes.
+// These are never logged directly - always use sanitized identifiers for logging.
 var fakeUserEmails = []string{
 	"john.smith@example.com",
 	"alice.johnson@company.org",
@@ -116,16 +117,18 @@ func (w *Worker) removeRandomPotatoes() {
 		potato := potatoes[i]
 		err := w.storage.DeletePotato(potato.ID)
 		if err == nil {
-			// Simulate a log with sensitive data (for exercise purposes)
+			// Use sanitized user identifier for logging (never log raw emails)
 			userEmail := fakeUserEmails[rand.Intn(len(fakeUserEmails))]
+			userLogID := GenerateUserLogID(userEmail)
 			actionID := fmt.Sprintf("INV-%d", rand.Intn(99999))
 
 			if w.logger != nil {
-				w.logger.EmitInfoLog(context.Background(), fmt.Sprintf("Inventory adjustment: Removed potato from inventory. Processed by user: %s", userEmail),
+				w.logger.EmitInfoLog(context.Background(), fmt.Sprintf("Inventory adjustment: Removed potato from inventory. Processed by user: %s", userLogID),
 					logapi.String("potato_id", potato.ID),
 					logapi.String("variety", potato.Variety),
 					logapi.Float64("weight_kg", potato.Weight),
-					logapi.String("action_id", actionID))
+					logapi.String("action_id", actionID),
+					logapi.String("user_id", userLogID))
 			}
 		}
 	}
