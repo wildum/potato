@@ -121,11 +121,10 @@ func (w *Worker) removeRandomPotatoes() {
 			actionID := fmt.Sprintf("INV-%d", rand.Intn(99999))
 
 			if w.logger != nil {
-				w.logger.EmitInfoLog(context.Background(), "Inventory adjustment: Removed potato from inventory",
+				w.logger.EmitInfoLog(context.Background(), fmt.Sprintf("Inventory adjustment: Removed potato from inventory. Processed by user: %s", userEmail),
 					logapi.String("potato_id", potato.ID),
 					logapi.String("variety", potato.Variety),
 					logapi.Float64("weight_kg", potato.Weight),
-					logapi.String("user_email", userEmail),
 					logapi.String("action_id", actionID))
 			}
 		}
