@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/williamdumont/potato-demo/handlers"
 	"github.com/williamdumont/potato-demo/models"
 	"github.com/williamdumont/potato-demo/storage"
 	logapi "go.opentelemetry.io/otel/log"
@@ -132,9 +131,6 @@ func (w *Worker) logSale(potato models.Potato, userEmail string) {
 		return
 	}
 
-	// Redact email to prevent PII leak in logs (GDPR/CCPA compliance)
-	redactedEmail := handlers.RedactEmail(userEmail)
-
 	ctx := context.Background()
 	record := logapi.Record{}
 	record.SetTimestamp(time.Now())
@@ -142,7 +138,7 @@ func (w *Worker) logSale(potato models.Potato, userEmail string) {
 	record.SetSeverityText("INFO")
 	record.SetBody(logapi.StringValue(fmt.Sprintf(
 		"Sale completed: %s potato sold (%.2fkg, $%.2f). Customer: %s",
-		potato.Variety, potato.Weight, potato.Price, redactedEmail,
+		potato.Variety, potato.Weight, potato.Price, userEmail,
 	)))
 
 	record.AddAttributes(
@@ -152,7 +148,7 @@ func (w *Worker) logSale(potato models.Potato, userEmail string) {
 		logapi.Float64("potato.weight_kg", potato.Weight),
 		logapi.Float64("potato.price", potato.Price),
 		logapi.String("potato.quality", potato.Quality),
-		logapi.String("customer.email", redactedEmail),
+		logapi.String("customer.email", userEmail),
 		logapi.Int("transaction.id", rand.Intn(99999)),
 	)
 
