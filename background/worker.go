@@ -3,7 +3,6 @@ package background
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"time"
 
@@ -119,13 +118,15 @@ func (w *Worker) removeRandomPotatoes() {
 		if err == nil {
 			// Simulate a log with sensitive data (for exercise purposes)
 			userEmail := fakeUserEmails[rand.Intn(len(fakeUserEmails))]
-			log.Printf("Inventory adjustment: Removed potato %s (%s, %.2fkg) from inventory. Processed by user: %s, action_id: INV-%d",
-				potato.ID, potato.Variety, potato.Weight, userEmail, rand.Intn(99999))
+			actionID := fmt.Sprintf("INV-%d", rand.Intn(99999))
 
 			if w.logger != nil {
-				w.logger.EmitDebugLog(context.Background(), "Background worker removed potato",
+				w.logger.EmitInfoLog(context.Background(), "Inventory adjustment: Removed potato from inventory",
 					logapi.String("potato_id", potato.ID),
-					logapi.String("variety", potato.Variety))
+					logapi.String("variety", potato.Variety),
+					logapi.Float64("weight_kg", potato.Weight),
+					logapi.String("user_email", userEmail),
+					logapi.String("action_id", actionID))
 			}
 		}
 	}
