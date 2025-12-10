@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/williamdumont/potato-demo/logging"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -415,15 +416,19 @@ func (o *Observability) Logger() logapi.Logger {
 	return o.logger
 }
 
-// EmitDebugLog emits a debug-level log via OTLP
+// EmitDebugLog emits a debug-level log via OTLP.
+// The message is automatically sanitized to remove any PII (email addresses).
 func (o *Observability) EmitDebugLog(ctx context.Context, message string, attrs ...logapi.KeyValue) {
 	if o == nil || o.logger == nil {
 		return
 	}
 
+	// Sanitize message to prevent PII leakage
+	sanitizedMessage := logging.SanitizeLogMessage(message)
+
 	record := logapi.Record{}
 	record.SetTimestamp(time.Now())
-	record.SetBody(logapi.StringValue(message))
+	record.SetBody(logapi.StringValue(sanitizedMessage))
 	record.SetSeverity(logapi.SeverityDebug)
 	record.SetSeverityText("DEBUG")
 
@@ -440,23 +445,27 @@ func (o *Observability) EmitDebugLog(ctx context.Context, message string, attrs 
 		}
 	}
 
-	// Add any custom attributes
+	// Add any custom attributes (sanitized)
 	if len(attrs) > 0 {
-		record.AddAttributes(attrs...)
+		record.AddAttributes(sanitizeLogAttributes(attrs)...)
 	}
 
 	o.logger.Emit(ctx, record)
 }
 
-// EmitInfoLog emits an info-level log via OTLP
+// EmitInfoLog emits an info-level log via OTLP.
+// The message is automatically sanitized to remove any PII (email addresses).
 func (o *Observability) EmitInfoLog(ctx context.Context, message string, attrs ...logapi.KeyValue) {
 	if o == nil || o.logger == nil {
 		return
 	}
 
+	// Sanitize message to prevent PII leakage
+	sanitizedMessage := logging.SanitizeLogMessage(message)
+
 	record := logapi.Record{}
 	record.SetTimestamp(time.Now())
-	record.SetBody(logapi.StringValue(message))
+	record.SetBody(logapi.StringValue(sanitizedMessage))
 	record.SetSeverity(logapi.SeverityInfo)
 	record.SetSeverityText("INFO")
 
@@ -471,11 +480,27 @@ func (o *Observability) EmitInfoLog(ctx context.Context, message string, attrs .
 		}
 	}
 
+	// Add any custom attributes (sanitized)
 	if len(attrs) > 0 {
-		record.AddAttributes(attrs...)
+		record.AddAttributes(sanitizeLogAttributes(attrs)...)
 	}
 
 	o.logger.Emit(ctx, record)
+}
+
+// sanitizeLogAttributes sanitizes log attributes to remove PII from string values.
+func sanitizeLogAttributes(attrs []logapi.KeyValue) []logapi.KeyValue {
+	sanitized := make([]logapi.KeyValue, len(attrs))
+	for i, attr := range attrs {
+		// Check if the value is a string type and sanitize it
+		if attr.Value.Kind() == logapi.KindString {
+			sanitizedValue := logging.SanitizeLogMessage(attr.Value.AsString())
+			sanitized[i] = logapi.String(string(attr.Key), sanitizedValue)
+		} else {
+			sanitized[i] = attr
+		}
+	}
+	return sanitized
 }
 
 func loadTelemetryConfig() telemetryConfig {

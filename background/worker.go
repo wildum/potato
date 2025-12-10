@@ -11,16 +11,17 @@ import (
 	logapi "go.opentelemetry.io/otel/log"
 )
 
-// Fake user emails for demo/exercise purposes (simulating sensitive data leak)
-var fakeUserEmails = []string{
-	"john.smith@example.com",
-	"alice.johnson@company.org",
-	"bob.wilson@email.net",
-	"sarah.davis@corporate.io",
-	"mike.brown@startup.co",
-	"emma.taylor@business.com",
-	"admin@potato-warehouse.internal",
-	"support@freshpotatoes.com",
+// fakeUserIDs contains anonymized user identifiers for demo purposes.
+// Using numeric IDs instead of email addresses to prevent PII leakage in logs.
+var fakeUserIDs = []string{
+	"user_1001",
+	"user_1002",
+	"user_1003",
+	"user_1004",
+	"user_1005",
+	"user_1006",
+	"user_1007",
+	"user_1008",
 }
 
 var (
@@ -116,16 +117,17 @@ func (w *Worker) removeRandomPotatoes() {
 		potato := potatoes[i]
 		err := w.storage.DeletePotato(potato.ID)
 		if err == nil {
-			// Simulate a log with sensitive data (for exercise purposes)
-			userEmail := fakeUserEmails[rand.Intn(len(fakeUserEmails))]
+			// Use anonymized user ID for logging to prevent PII leakage
+			userID := fakeUserIDs[rand.Intn(len(fakeUserIDs))]
 			actionID := fmt.Sprintf("INV-%d", rand.Intn(99999))
 
 			if w.logger != nil {
-				w.logger.EmitInfoLog(context.Background(), fmt.Sprintf("Inventory adjustment: Removed potato from inventory. Processed by user: %s", userEmail),
+				w.logger.EmitInfoLog(context.Background(), fmt.Sprintf("Inventory adjustment: Removed potato from inventory. Processed by user_id: %s", userID),
 					logapi.String("potato_id", potato.ID),
 					logapi.String("variety", potato.Variety),
 					logapi.Float64("weight_kg", potato.Weight),
-					logapi.String("action_id", actionID))
+					logapi.String("action_id", actionID),
+					logapi.String("user_id", userID))
 			}
 		}
 	}
